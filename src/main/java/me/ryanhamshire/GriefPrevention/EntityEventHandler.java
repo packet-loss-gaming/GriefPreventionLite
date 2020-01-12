@@ -216,14 +216,7 @@ public class EntityEventHandler implements Listener
                     //if did not fall straight down
                     if(originalLocation.getBlockX() != newLocation.getBlockX() || originalLocation.getBlockZ() != newLocation.getBlockZ())
                     {
-                        //in creative mode worlds, never form the block
-                        if(GriefPrevention.instance.config_claims_worldModes.get(newLocation.getWorld()) == ClaimsMode.Creative)
-                        {
-                            event.setCancelled(true);
-                            return;
-                        }
-
-                        //in other worlds, if landing in land claim, only allow if source was also in the land claim
+                        //if landing in land claim, only allow if source was also in the land claim
                         Claim claim = this.dataStore.getClaimAt(newLocation, false, null);
                         if(claim != null && !claim.contains(originalLocation, false, false))
                         {
@@ -354,6 +347,23 @@ public class EntityEventHandler implements Listener
         //clear original damage list and replace with allowed damage list
         blocks.clear();
         blocks.addAll(explodedBlocks);
+    }
+
+    @EventHandler(priority = EventPriority.LOWEST)
+    public void onEntitySpawn(CreatureSpawnEvent event)
+    {
+        if (!GriefPrevention.instance.config_claims_preventClaimMonsterSpawns) return;
+
+        Entity entity = event.getEntity();
+        if (!(entity instanceof Monster)) return;
+
+        Claim claim = this.dataStore.getClaimAt(event.getLocation(), false, null);
+        if(claim == null)
+        {
+            return;
+        }
+
+        event.setCancelled(true);
     }
 
 	//when an entity picks up an item
