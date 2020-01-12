@@ -18,54 +18,28 @@
 
 package me.ryanhamshire.GriefPrevention;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-import java.util.UUID;
-
 import org.bukkit.Bukkit;
-import org.bukkit.ChatColor;
-import org.bukkit.GameMode;
 import org.bukkit.Location;
 import org.bukkit.Material;
-import org.bukkit.OfflinePlayer;
 import org.bukkit.Tag;
-import org.bukkit.World;
 import org.bukkit.World.Environment;
 import org.bukkit.block.Block;
 import org.bukkit.block.BlockFace;
 import org.bukkit.block.BlockState;
-import org.bukkit.block.Hopper;
-import org.bukkit.block.Lectern;
-import org.bukkit.entity.Entity;
-import org.bukkit.entity.Item;
-import org.bukkit.entity.LivingEntity;
 import org.bukkit.entity.Player;
 import org.bukkit.entity.Projectile;
-import org.bukkit.entity.minecart.HopperMinecart;
 import org.bukkit.event.EventHandler;
 import org.bukkit.event.EventPriority;
 import org.bukkit.event.Listener;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.event.block.BlockBurnEvent;
-import org.bukkit.event.block.BlockDispenseEvent;
-import org.bukkit.event.block.BlockFormEvent;
-import org.bukkit.event.block.BlockFromToEvent;
-import org.bukkit.event.block.BlockIgniteEvent;
+import org.bukkit.event.block.*;
 import org.bukkit.event.block.BlockIgniteEvent.IgniteCause;
-import org.bukkit.event.block.BlockMultiPlaceEvent;
-import org.bukkit.event.block.BlockPistonExtendEvent;
-import org.bukkit.event.block.BlockPistonRetractEvent;
-import org.bukkit.event.block.BlockPlaceEvent;
-import org.bukkit.event.block.BlockSpreadEvent;
-import org.bukkit.event.block.SignChangeEvent;
 import org.bukkit.event.entity.ProjectileHitEvent;
-import org.bukkit.event.inventory.InventoryPickupItemEvent;
 import org.bukkit.event.world.StructureGrowEvent;
-import org.bukkit.inventory.InventoryHolder;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.material.Dispenser;
-import org.bukkit.metadata.MetadataValue;
+
+import java.util.ArrayList;
+import java.util.List;
 
 //event handlers related to blocks
 public class BlockEventHandler implements Listener 
@@ -113,63 +87,7 @@ public class BlockEventHandler implements Listener
 			return;
 		}
 	}
-	
-	//when a player places a sign...
-	@EventHandler(ignoreCancelled = true)
-	public void onSignChanged(SignChangeEvent event)
-	{
-	    //send sign content to online administrators
-	    if(!GriefPrevention.instance.config_signNotifications) return;
-	    
-	    Player player = event.getPlayer();
-		if(player == null) return;
-		
-		StringBuilder lines = new StringBuilder(" placed a sign @ " + GriefPrevention.getfriendlyLocationString(event.getBlock().getLocation()));
-		boolean notEmpty = false;
-		for(int i = 0; i < event.getLines().length; i++)
-		{
-			String withoutSpaces = event.getLine(i).replace(" ", ""); 
-		    if(!withoutSpaces.isEmpty())
-	        {
-		        notEmpty = true;
-		        lines.append("\n  " + event.getLine(i));
-	        }
-		}
-		
-		String signMessage = lines.toString();
-		
-		//prevent signs with blocked IP addresses 
-		if(!player.hasPermission("griefprevention.spam") && GriefPrevention.instance.containsBlockedIP(signMessage))
-        {
-            event.setCancelled(true);
-            return;
-        }
-		
-		PlayerData playerData = this.dataStore.getPlayerData(player.getUniqueId());
-		//if not empty and wasn't the same as the last sign, log it and remember it for later
-		//This has been temporarily removed since `signMessage` includes location, not just the message. Waste of memory IMO
-		//if(notEmpty && (playerData.lastSignMessage == null || !playerData.lastSignMessage.equals(signMessage)))
-		if (notEmpty)
-		{		
-			GriefPrevention.AddLogEntry(player.getName() + lines.toString().replace("\n  ", ";"), null);
-			PlayerEventHandler.makeSocialLogEntry(player.getName(), signMessage);
-			//playerData.lastSignMessage = signMessage;
-			
-			if(!player.hasPermission("griefprevention.eavesdropsigns"))
-			{
-				@SuppressWarnings("unchecked")
-                Collection<Player> players = (Collection<Player>)GriefPrevention.instance.getServer().getOnlinePlayers();
-				for(Player otherPlayer : players)
-				{
-					if(otherPlayer.hasPermission("griefprevention.eavesdropsigns"))
-					{
-						otherPlayer.sendMessage(ChatColor.GRAY + player.getName() + signMessage);
-					}
-				}
-			}
-		}
-	}
-	
+
 	//when a player places multiple blocks...
 	@EventHandler(ignoreCancelled = true, priority = EventPriority.HIGHEST)
 	public void onBlocksPlace(BlockMultiPlaceEvent placeEvent)
@@ -191,15 +109,7 @@ public class BlockEventHandler implements Listener
             }
         }
 	}
-	
-	private boolean doesAllowFireProximityInWorld(World world) {
-		if (GriefPrevention.instance.pvpRulesApply(world)) {
-			return GriefPrevention.instance.config_pvp_allowFireNearPlayers;
-		} else {
-			return GriefPrevention.instance.config_pvp_allowFireNearPlayers_NonPvp;
-		}
-	}
-	
+
 	//when a player places a block...
 	@SuppressWarnings("null")
     @EventHandler(ignoreCancelled = true, priority = EventPriority.HIGH)
@@ -208,31 +118,6 @@ public class BlockEventHandler implements Listener
 		Player player = placeEvent.getPlayer();
 		Block block = placeEvent.getBlock();
 				
-		//FEATURE: limit fire placement, to prevent PvP-by-fire
-		
-		//if placed block is fire and pvp is off, apply rules for proximity to other players 
-		if(block.getType() == Material.FIRE && !doesAllowFireProximityInWorld(block.getWorld()))
-		{
-			List<Player> players = block.getWorld().getPlayers();
-			for(int i = 0; i < players.size(); i++)
-			{
-				Player otherPlayer = players.get(i);
-
-				// Ignore players in creative or spectator mode to avoid users from checking if someone is spectating near them
-				if(otherPlayer.getGameMode() == GameMode.CREATIVE || otherPlayer.getGameMode() == GameMode.SPECTATOR) {
-					continue;
-				}
-
-				Location location = otherPlayer.getLocation();
-				if(!otherPlayer.equals(player) && location.distanceSquared(block.getLocation()) < 9 && player.canSee(otherPlayer))
-				{
-					GriefPrevention.sendMessage(player, TextMode.Err, Messages.PlayerTooCloseForFire2);
-					placeEvent.setCancelled(true);
-					return;
-				}					
-			}
-		}
-		
 		//don't track in worlds where claims are not enabled
         if(!GriefPrevention.instance.claimsEnabledForWorld(placeEvent.getBlock().getWorld())) return;
 		
@@ -270,7 +155,7 @@ public class BlockEventHandler implements Listener
 		    playerData.lastClaim = claim;
 		    
 			//warn about TNT not destroying claimed blocks
-            if(block.getType() == Material.TNT && !claim.areExplosivesAllowed && playerData.siegeData == null)
+            if(block.getType() == Material.TNT && !claim.areExplosivesAllowed)
             {
                 GriefPrevention.sendMessage(player, TextMode.Warn, Messages.NoTNTDamageClaims);
                 GriefPrevention.sendMessage(player, TextMode.Instr, Messages.ClaimExplosivesAdvertisement);
@@ -414,8 +299,7 @@ public class BlockEventHandler implements Listener
 		if(	GriefPrevention.instance.config_blockSurfaceOtherExplosions && block.getType() == Material.TNT &&
 			block.getWorld().getEnvironment() != Environment.NETHER &&
 			block.getY() > GriefPrevention.instance.getSeaLevel(block.getWorld()) - 5 &&
-			claim == null &&
-			playerData.siegeData == null)
+			claim == null)
 		{
 			GriefPrevention.sendMessage(player, TextMode.Warn, Messages.NoTNTDamageAboveSeaLevel);
 		}
@@ -426,18 +310,6 @@ public class BlockEventHandler implements Listener
 	        claim == null )
 		{
 		    GriefPrevention.sendMessage(player, TextMode.Warn, Messages.NoPistonsOutsideClaims);
-		}
-		
-		//limit active blocks in creative mode worlds
-		if(!player.hasPermission("griefprevention.adminclaims") && GriefPrevention.instance.creativeRulesApply(block.getLocation()) && isActiveBlock(block))
-		{
-    		String noPlaceReason = claim.allowMoreActiveBlocks();
-            if(noPlaceReason != null)
-            {
-                GriefPrevention.sendMessage(player, TextMode.Err, noPlaceReason);
-                placeEvent.setCancelled(true);
-                return;
-            }
 		}
 	}
 	
@@ -789,32 +661,6 @@ public class BlockEventHandler implements Listener
                 }
             }
         }
-        
-        //otherwise if creative mode world, don't flow
-        else if(GriefPrevention.instance.creativeRulesApply(toLocation))
-        {
-            spreadEvent.setCancelled(true);
-        }
-	}
-	
-	@EventHandler(ignoreCancelled = true, priority = EventPriority.LOWEST)
-	public void onForm(BlockFormEvent event)
-	{
-	    Block block = event.getBlock();
-	    Location location = block.getLocation();
-	    
-	    if(GriefPrevention.instance.creativeRulesApply(location))
-	    {
-	        Material type = block.getType();
-	        if(type == Material.COBBLESTONE || type == Material.OBSIDIAN || type == Material.LAVA || type == Material.WATER)
-	        {
-	            Claim claim = GriefPrevention.instance.dataStore.getClaimAt(location, false, null);
-	            if(claim == null)
-	            {
-	                event.setCancelled(true);
-	            }
-	        }
-	    }
 	}
 
 	//Stop projectiles from destroying blocks that don't fire a proper event
@@ -873,15 +719,7 @@ public class BlockEventHandler implements Listener
 		Block toBlock = fromBlock.getRelative(dispenser.getFacing());
 		Claim fromClaim = this.dataStore.getClaimAt(fromBlock.getLocation(), false, null);
 		Claim toClaim = this.dataStore.getClaimAt(toBlock.getLocation(), false, fromClaim);
-		
-		//into wilderness is NOT OK in creative mode worlds
-		Material materialDispensed = dispenseEvent.getItem().getType();
-		if((materialDispensed == Material.WATER_BUCKET || materialDispensed == Material.LAVA_BUCKET) && GriefPrevention.instance.creativeRulesApply(dispenseEvent.getBlock().getLocation()) && toClaim == null)
-		{
-			dispenseEvent.setCancelled(true);
-			return;
-		}
-		
+
 		//wilderness to wilderness is OK
 		if(fromClaim == null && toClaim == null) return;
 		
@@ -935,35 +773,4 @@ public class BlockEventHandler implements Listener
             }
         }
     }
-	
-	@EventHandler(ignoreCancelled = true)
-    public void onInventoryPickupItem (InventoryPickupItemEvent event) 
-    {
-	    //prevent hoppers from picking-up items dropped by players on death
-
-	    InventoryHolder holder = event.getInventory().getHolder();
-	    if(holder instanceof HopperMinecart || holder instanceof Hopper)
-	    {
-	        Item item = event.getItem();
-	        List<MetadataValue> data = item.getMetadata("GP_ITEMOWNER");
-	        //if this is marked as belonging to a player
-	        if(data != null && data.size() > 0)
-	        {
-	        	 UUID ownerID = (UUID)data.get(0).value();
-	 		    
-	 		    //has that player unlocked his drops?
-	 		    OfflinePlayer owner = GriefPrevention.instance.getServer().getOfflinePlayer(ownerID);
-	 		    if(owner.isOnline())
-	 		    {
-	 		        PlayerData playerData = this.dataStore.getPlayerData(ownerID);
-
-	                 //if locked, don't allow pickup
-	 		        if(!playerData.dropsAreUnlocked)
-	 		        {
-	 		        	event.setCancelled(true);
-	 		        }
-	 		    }
-	        }
-	    }
-	}
 }

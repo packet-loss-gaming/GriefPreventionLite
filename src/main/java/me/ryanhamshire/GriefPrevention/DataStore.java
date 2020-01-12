@@ -250,91 +250,7 @@ public abstract class DataStore
             catch(IOException exception) {}
         }        
     }
-	
-	public List<String> loadBannedWords()
-    {
-        try
-        {
-    	    File bannedWordsFile = new File(bannedWordsFilePath);
-            if(!bannedWordsFile.exists())
-            {
-                Files.touch(bannedWordsFile);
-                String defaultWords = 
-                    "nigger\nniggers\nniger\nnigga\nnigers\nniggas\n" + 
-                    "fag\nfags\nfaggot\nfaggots\nfeggit\nfeggits\nfaggit\nfaggits\n" +
-                    "cunt\ncunts\nwhore\nwhores\nslut\nsluts\n";
-                Files.append(defaultWords, bannedWordsFile, Charset.forName("UTF-8"));
-            }
-            
-            return Files.readLines(bannedWordsFile, Charset.forName("UTF-8"));
-        }
-        catch(Exception e)
-        {
-            GriefPrevention.AddLogEntry("Failed to read from the banned words data file: " + e.toString());
-            e.printStackTrace();
-            return new ArrayList<String>();
-        }
-    }
-	
-	//updates soft mute map and data file
-	boolean toggleSoftMute(UUID playerID)
-	{
-	    boolean newValue = !this.isSoftMuted(playerID);
-	    
-	    this.softMuteMap.put(playerID, newValue);
-	    this.saveSoftMutes();
-	    
-	    return newValue;
-	}
-	
-	public boolean isSoftMuted(UUID playerID)
-	{
-	    Boolean mapEntry = this.softMuteMap.get(playerID);
-	    if(mapEntry == null || mapEntry == Boolean.FALSE)
-	    {
-	        return false;
-	    }
-	    
-	    return true;
-	}
-	
-	private void saveSoftMutes()
-	{
-	    BufferedWriter outStream = null;
-        
-        try
-        {
-            //open the file and write the new value
-            File softMuteFile = new File(softMuteFilePath);
-            softMuteFile.createNewFile();
-            outStream = new BufferedWriter(new FileWriter(softMuteFile));
-            
-            for(Map.Entry<UUID, Boolean> entry : softMuteMap.entrySet())
-            {
-                if(entry.getValue().booleanValue())
-                {
-                    outStream.write(entry.getKey().toString());
-                    outStream.newLine();
-                }
-            }
-            
-        }       
-        
-        //if any problem, log it
-        catch(Exception e)
-        {
-            GriefPrevention.AddLogEntry("Unexpected exception saving soft mute data: " + e.getMessage());
-            e.printStackTrace();
-        }
-        
-        //close the file
-        try
-        {
-            if(outStream != null) outStream.close();
-        }
-        catch(IOException exception) {}
-	}
-	
+
     //removes cached player data from memory
 	synchronized void clearCachedPlayerData(UUID playerID)
 	{
@@ -958,40 +874,6 @@ public abstract class DataStore
 	{
 	    //save everything except the ignore list
 	    this.overrideSavePlayerData(playerID, playerData);
-	    
-	    //save the ignore list
-	    if(playerData.ignoreListChanged)
-	    {
-    	    StringBuilder fileContent = new StringBuilder();
-            try
-            {
-                for(UUID uuidKey : playerData.ignoredPlayers.keySet())
-                {
-                    Boolean value = playerData.ignoredPlayers.get(uuidKey);
-                    if(value == null) continue;
-                    
-                    //admin-enforced ignores begin with an asterisk
-                    if(value)
-                    {
-                        fileContent.append("*");
-                    }
-                    
-                    fileContent.append(uuidKey);
-                    fileContent.append("\n");
-                }
-                
-                //write data to file
-                File playerDataFile = new File(playerDataFolderPath + File.separator + playerID + ".ignore");
-                Files.write(fileContent.toString().trim().getBytes("UTF-8"), playerDataFile);
-            }  
-            
-            //if any problem, log it
-            catch(Exception e)
-            {
-                GriefPrevention.AddLogEntry("GriefPrevention: Unexpected exception saving data for player \"" + playerID.toString() + "\": " + e.getMessage());
-                e.printStackTrace();
-            }
-	    }
 	}
 	
 	abstract void overrideSavePlayerData(UUID playerID, PlayerData playerData);
@@ -1018,146 +900,6 @@ public abstract class DataStore
 		this.saveClaim(claim);
 		ClaimModifiedEvent event = new ClaimModifiedEvent(claim,null);
         Bukkit.getPluginManager().callEvent(event);
-	}
-
-	//starts a siege on a claim
-	//does NOT check siege cooldowns, see onCooldown() below
-	synchronized public void startSiege(Player attacker, Player defender, Claim defenderClaim)
-	{
-		//fill-in the necessary SiegeData instance
-		SiegeData siegeData = new SiegeData(attacker, defender, defenderClaim);
-		PlayerData attackerData = this.getPlayerData(attacker.getUniqueId());
-		PlayerData defenderData = this.getPlayerData(defender.getUniqueId());
-		attackerData.siegeData = siegeData;
-		defenderData.siegeData = siegeData;
-		defenderClaim.siegeData = siegeData;
-		
-		//start a task to monitor the siege
-		//why isn't this a "repeating" task?
-		//because depending on the status of the siege at the time the task runs, there may or may not be a reason to run the task again
-		SiegeCheckupTask task = new SiegeCheckupTask(siegeData);
-		siegeData.checkupTaskID = GriefPrevention.instance.getServer().getScheduler().scheduleSyncDelayedTask(GriefPrevention.instance, task, 20L * 30);
-	}
-	
-	//ends a siege
-	//either winnerName or loserName can be null, but not both
-	synchronized public void endSiege(SiegeData siegeData, String winnerName, String loserName, List<ItemStack> drops)
-	{
-		boolean grantAccess = false;
-		
-		//determine winner and loser
-		if(winnerName == null && loserName != null)
-		{
-			if(siegeData.attacker.getName().equals(loserName))
-			{
-				winnerName = siegeData.defender.getName();
-			}
-			else
-			{
-				winnerName = siegeData.attacker.getName();
-			}
-		}
-		else if(winnerName != null && loserName == null)
-		{
-			if(siegeData.attacker.getName().equals(winnerName))
-			{
-				loserName = siegeData.defender.getName();
-			}
-			else
-			{
-				loserName = siegeData.attacker.getName();
-			}
-		}
-		
-		//if the attacker won, plan to open the doors for looting
-		if(siegeData.attacker.getName().equals(winnerName))
-		{
-			grantAccess = true;
-		}
-		
-		PlayerData attackerData = this.getPlayerData(siegeData.attacker.getUniqueId());
-		attackerData.siegeData = null;
-		
-		PlayerData defenderData = this.getPlayerData(siegeData.defender.getUniqueId());	
-		defenderData.siegeData = null;
-		defenderData.lastSiegeEndTimeStamp = System.currentTimeMillis();
-
-		//start a cooldown for this attacker/defender pair
-		Long now = Calendar.getInstance().getTimeInMillis();
-		Long cooldownEnd = now + 1000 * 60 * GriefPrevention.instance.config_siege_cooldownEndInMinutes;  //one hour from now
-		this.siegeCooldownRemaining.put(siegeData.attacker.getName() + "_" + siegeData.defender.getName(), cooldownEnd);
-		
-		//start cooldowns for every attacker/involved claim pair
-		for(int i = 0; i < siegeData.claims.size(); i++)
-		{
-			Claim claim = siegeData.claims.get(i);
-			claim.siegeData = null;
-			this.siegeCooldownRemaining.put(siegeData.attacker.getName() + "_" + claim.getOwnerName(), cooldownEnd);
-			
-			//if doors should be opened for looting, do that now
-			if(grantAccess)
-			{
-				claim.doorsOpen = true;
-			}
-		}
-
-		//cancel the siege checkup task
-		GriefPrevention.instance.getServer().getScheduler().cancelTask(siegeData.checkupTaskID);
-		
-		//notify everyone who won and lost
-		if(winnerName != null && loserName != null)
-		{
-			GriefPrevention.instance.getServer().broadcastMessage(winnerName + " defeated " + loserName + " in siege warfare!");
-		}
-		
-		//if the claim should be opened to looting
-		if(grantAccess)
-		{
-			@SuppressWarnings("deprecation")
-            Player winner = GriefPrevention.instance.getServer().getPlayer(winnerName);
-			if(winner != null)
-			{
-				//notify the winner
-				GriefPrevention.sendMessage(winner, TextMode.Success, Messages.SiegeWinDoorsOpen);
-				
-				//schedule a task to secure the claims in about 5 minutes
-				SecureClaimTask task = new SecureClaimTask(siegeData);
-
-				GriefPrevention.instance.getServer().getScheduler().scheduleSyncDelayedTask(
-                                        GriefPrevention.instance, task, 20L * GriefPrevention.instance.config_siege_doorsOpenSeconds
-                                );
-			}
-		}
-		
-		//if the siege ended due to death, transfer inventory to winner
-		if(drops != null)
-		{
-			@SuppressWarnings("deprecation")
-            Player winner = GriefPrevention.instance.getServer().getPlayer(winnerName);
-			@SuppressWarnings("deprecation")
-            Player loser = GriefPrevention.instance.getServer().getPlayer(loserName);
-			if(winner != null && loser != null)
-			{
-				//try to add any drops to the winner's inventory
-				for(ItemStack stack : drops)
-				{
-					if(stack == null || stack.getType() == Material.AIR || stack.getAmount() == 0) continue;
-					
-					HashMap<Integer, ItemStack> wontFitItems = winner.getInventory().addItem(stack);
-					
-					//drop any remainder on the ground at his feet
-					Object [] keys = wontFitItems.keySet().toArray();
-					Location winnerLocation = winner.getLocation(); 
-					for(int i = 0; i < keys.length; i++)
-					{
-						Integer key = (Integer)keys[i];
-						winnerLocation.getWorld().dropItemNaturally(winnerLocation, wontFitItems.get(key));
-					}
-				}
-				
-				drops.clear();
-			}
-		}
 	}
 	
 	//timestamp for each siege cooldown to end
@@ -1210,28 +952,6 @@ public abstract class DataStore
 		return false;
 	}
 
-	//extend a siege, if it's possible to do so
-	synchronized void tryExtendSiege(Player player, Claim claim)
-	{
-		PlayerData playerData = this.getPlayerData(player.getUniqueId());
-		
-		//player must be sieged
-		if(playerData.siegeData == null) return;
-		
-		//claim isn't already under the same siege
-		if(playerData.siegeData.claims.contains(claim)) return;
-		
-		//admin claims can't be sieged
-		if(claim.isAdminClaim()) return;
-		
-		//player must have some level of permission to be sieged in a claim
-		if(claim.allowAccess(player) != null) return;
-		
-		//otherwise extend the siege
-		playerData.siegeData.claims.add(claim);
-		claim.siegeData = playerData.siegeData;
-	}		
-	
 	//deletes all claims owned by a player
 	synchronized public void deleteClaimsForPlayer(UUID playerID, boolean releasePets)
 	{
@@ -1247,17 +967,9 @@ public abstract class DataStore
 		//delete them one by one
 		for(int i = 0; i < claimsToDelete.size(); i++)
 		{
-			Claim claim = claimsToDelete.get(i); 
-			claim.removeSurfaceFluids(null);
-
+			Claim claim = claimsToDelete.get(i);
 			this.deleteClaim(claim, releasePets);
-			
-			//if in a creative mode world, delete the claim
-			if(GriefPrevention.instance.creativeRulesApply(claim.getLesserBoundaryCorner()))
-			{
-				GriefPrevention.instance.restoreClaim(claim, 0);
-			}
-		}					
+		}
 	}
 
 	//tries to resize a claim
@@ -1330,25 +1042,7 @@ public abstract class DataStore
         //special rule for making a top-level claim smaller.  to check this, verifying the old claim's corners are inside the new claim's boundaries.
         //rule: in any mode, shrinking a claim removes any surface fluids
         Claim oldClaim = playerData.claimResizing;
-        boolean smaller = false;
-        if(oldClaim.parent == null)
-        {               
-            //temporary claim instance, just for checking contains()
-            Claim newClaim = new Claim(
-                    new Location(oldClaim.getLesserBoundaryCorner().getWorld(), newx1, newy1, newz1), 
-                    new Location(oldClaim.getLesserBoundaryCorner().getWorld(), newx2, newy2, newz2),
-                    null, new ArrayList<String>(), new ArrayList<String>(), new ArrayList<String>(), new ArrayList<String>(), null);
-            
-            //if the new claim is smaller
-            if(!newClaim.contains(oldClaim.getLesserBoundaryCorner(), true, false) || !newClaim.contains(oldClaim.getGreaterBoundaryCorner(), true, false))
-            {
-                smaller = true;
-                
-                //remove surface fluids about to be unclaimed
-                oldClaim.removeSurfaceFluids(newClaim);
-            }
-        }
-        
+
         //ask the datastore to try and resize the claim, this checks for conflicts with other claims
         CreateClaimResult result = GriefPrevention.instance.dataStore.resizeClaim(playerData.claimResizing, newx1, newx2, newy1, newy2, newz1, newz2, player);
         
@@ -1395,14 +1089,6 @@ public abstract class DataStore
             {
               GriefPrevention.sendMessage(player, TextMode.Info, Messages.BecomeMayor, 200L);
               GriefPrevention.sendMessage(player, TextMode.Instr, Messages.SubdivisionVideo2, 201L, DataStore.SUBDIVISION_VIDEO_URL);
-            }
-            
-            //if in a creative mode world and shrinking an existing claim, restore any unclaimed area
-            if(smaller && GriefPrevention.instance.creativeRulesApply(oldClaim.getLesserBoundaryCorner()))
-            {
-                GriefPrevention.sendMessage(player, TextMode.Warn, Messages.UnclaimCleanupWarning);
-                GriefPrevention.instance.restoreClaim(oldClaim, 20L * 60 * 2);  //2 minutes
-                GriefPrevention.AddLogEntry(player.getName() + " shrank a claim @ " + GriefPrevention.getfriendlyLocationString(playerData.claimResizing.getLesserBoundaryCorner()));
             }
             
             //clean up
