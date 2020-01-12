@@ -353,6 +353,7 @@ public class EntityEventHandler implements Listener
     public void onEntitySpawn(CreatureSpawnEvent event)
     {
         if (!GriefPrevention.instance.config_claims_preventClaimMonsterSpawns) return;
+        if (event.getSpawnReason() != SpawnReason.NATURAL) return;
 
         Entity entity = event.getEntity();
         if (!(entity instanceof Monster)) return;
